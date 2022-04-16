@@ -1,0 +1,173 @@
+version: '3.7'
+
+volumes:
+    prometheus_data: {}
+    grafana_data: {}
+
+networks:
+  front-tier:
+  back-tier:
+  pdf2data:
+
+services:
+  web:
+    env_file:
+      - env.dev
+    build:
+       context: ./services/api
+    command: gunicorn main:app --reload --bind 0.0.0.0:5000 --timeout 1000 -w 4 -k uvicorn.workers.UvicornWorker
+    expose:
+      - 5000
+    labels:
+      - "traefik.docker.network=pdf2data"
+      - "traefik.enable=true"
+      - "traefik.http.routers.fastapi.rule=Host(`localhost`)"
+      - "traefik.http.routers.fastapi.service=pdf2dataapi"
+      - "traefik.http.services.pdf2dataapi.loadbalancer.server.port=5000"
+      - "traefik.http.routers.blog.entrypoints=web"
+    networks:
+      - pdf2data
+
+  traefik:
+    image: traefik:v2.2
+    ports:
+      - "81:80"
+      - "8081:8080"
+    volumes:
+      - "//var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./services/traefik/traefik.dev.toml:/etc/traefik/traefik.toml"
+    networks:
+      - pdf2data
+      - front-tier
+      - back-tier
+
+  prometheus:
+    image: prom/prometheus:v2.1.0
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - 9090:9090
+    links:
+      - cadvisor:cadvisor
+      - alertmanager:alertmanager
+#      - pushgateway:pushgateway
+    labels: 
+      - "traefik.docker.network=traefik"
+      - "traefik.backend=prometheus"
+      - "traefik.frontend.rule=Host:prometheus.localhost"
+      - "traefik.port=9090"
+      - "traefik.enable=true"
+    depends_on:
+      - cadvisor
+#      - pushgateway
+    networks:
+      - front-tier
+      - back-tier
+    restart: always
+
+
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.hostname == ${HOSTNAME}
+
+  node-exporter:
+    image: prom/node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command: 
+      - '--path.procfs=/host/proc' 
+      - '--path.sysfs=/host/sys'
+      - --collector.filesystem.ignored-mount-points
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+    ports:
+      - 9100:9100
+    networks:
+      - back-tier
+    restart: always
+    deploy:
+      mode: global
+    labels:
+      - "traefik.enable=true"
+
+  alertmanager:
+    image: prom/alertmanager
+    ports:
+      - 9093:9093
+    volumes:
+      - ./alertmanager/:/etc/alertmanager/
+    networks:
+      - back-tier
+    restart: always
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+    labels:
+      - "traefik.enable=true"
+
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.hostname == ${HOSTNAME}
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    command:
+      - '-port=8098'
+    volumes:
+      - //:/rootfs:ro
+      - //var/run:/var/run:ro
+      - //sys:/sys:ro
+      - //var/lib/docker/:/var/lib/docker:ro
+      - //dev/disk:/dev/disk/:ro
+      - //etc/machine-id:/etc/machine-id:ro
+      - //var/lib/dbus/machine-id:/var/lib/dbus/machine-id:ro
+    devices:
+      - /dev/kmsg
+    ports:
+      - 8098:8098
+    networks:
+      - back-tier
+    restart: always
+    deploy:
+      mode: global
+    labels:
+      - "traefik.enable=true"
+
+
+  grafana:
+    image: grafana/grafana
+    user: "472"
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+    env_file:
+      - ./grafana/config.monitoring
+    networks:
+      - back-tier
+      - front-tier
+    restart: always
+    labels:
+      - "traefik.enable=true"
+
+#  pushgateway:
+#    image: prom/pushgateway
+#    restart: always
+#    expose:
+#      - 9091
+#    ports:
+#      - "9091:9091"
+#    networks:
+#      - back-tier

@@ -1,0 +1,28 @@
+#route:
+#  receiver: 'slack'
+
+#receivers:
+#  - name: 'slack'
+#       slack_configs:
+#           - send_resolved: true
+#             username: '<username>'
+#             channel: '#<channel-name>'
+#             api_url: '<incomming-webhook-url>'
+global:
+  resolve_timeout: 5m
+route:
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'email-receiver'
+receivers:
+- name: 'null'
+- name: email-receiver
+  email_configs:
+  - to: patrikslovak9@gmail.com
+    from: sp.txx1234567890@gmail.com
+    smarthost: smtp.gmail.com:587
+    auth_username: "sp.txx1234567890@gmail.com"
+    auth_identity: "sp.txx1234567890@gmail.com"
+    auth_password: "c##supplierportal"
+    send_resolved: true
